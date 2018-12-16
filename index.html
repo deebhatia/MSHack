@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>River Health</title>
+    <script
+            src="https://code.jquery.com/jquery-3.3.1.min.js"
+            integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8="
+            crossorigin="anonymous">
+    </script>
+    <script src="https://apis.mapmyindia.com/advancedmaps/v1/6qx9qutd213kfcz8p8w9y25y1tqwavff/map_load?v=01."></script>
+    <script src="prunjs.js"></script>
+    <!--<script src="orig-prunejs.js"></script>-->
+    <!--<script src="leaflet-heat.js"></script>-->
+    <link rel="stylesheet" href="prune.css" />
+    <style>
+        #map {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+        html {
+            height: 100%;
+        }
+
+        body {
+            height: 100%;
+            font-family: Verdana, sans-serif, Arial;
+            color: #000;
+            margin: 0;
+            font-size: 14px;
+            padding: 0;
+        }
+
+        #map-container {
+            position: absolute;
+            left: 312px;
+            top: 46px;
+            right: 2px;
+            bottom: 2px;
+            border: 1px solid #cccccc;
+        }
+
+        #result {
+            position: absolute;
+            left: 2px;
+            top: 46px;
+            width: 306px;
+            bottom: 2px;
+            border: 1px solid #cccccc;
+            background-color: #FAFAFA;
+            overflow: auto;
+            font-family: Verdana, sans-serif, Arial;
+        }
+
+        button {
+            width: 220px;
+            font-family: Verdana, sans-serif, Arial;
+            font-size: 12px;
+            padding: 4px 0;
+            color: #333;
+            border-radius: 5px 5px 5px 5px;
+        }
+
+        .btn-div {
+            padding: 12px 12px 6px 38px;
+        }
+
+        .top-div {
+            border-bottom: 1px solid #e9e9e9;
+            padding: 10px 12px;
+            background: #fff;
+        }
+
+        .top-div-span1 {
+            font-size: 20px;
+        }
+
+        .top-div-span2 {
+            font-size: 16px;
+            color: #777
+        }
+
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = new MapmyIndia.Map("map",{ center:[26.30, 84.22],zoomControl: true,hybrid:true, zoom: 6});
+        let markerCluster;
+
+        function getCoordinates() {
+            let all_markers = [];
+            let gangaPromise = $.get('ganges.json');
+            gangaPromise.done(function(data) {
+                let polylineParam = {
+                    weight: 8,
+                    opacity: 0.5
+                };
+                data.features.forEach(function (feature) {
+                    let line_markers = [];
+                    feature.geometry.coordinates.forEach(function (point) {
+                        let marker = createMarker(point);
+                        line_markers.push(marker);
+                    });
+                    let poly = new L.Polyline(line_markers, polylineParam);
+                    map.addLayer(poly);
+                    all_markers = all_markers.concat(line_markers);
+                });
+                showCluster(all_markers);
+            });
+        }
+
+        getCoordinates();
+        function markerProcessor(markerData) {
+            return markerData.intensity;
+        }
+        function showCluster(all_markers) {
+            PruneCluster.Cluster.ENABLE_MARKERS_LIST = true;
+            markerCluster = new PruneClusterForLeaflet();
+            markerCluster.initialize(undefined, undefined, markerProcessor);
+            markerCluster.Cluster.Size = 150;
+            markerCluster.singleMarkerMode = true;
+            let clusterMarkers = [];
+            all_markers.forEach(function (point_index) {
+                let marker = new PruneCluster.Marker(point_index.lat, point_index.lng);
+                marker.SetDataProcessor(markerProcessor);
+                marker.data.intensity = 0;
+                markerCluster.PrepareLeafletMarker = function(marker, data) {
+                    marker.setIcon(L.icon({
+                        iconUrl: "http://www.mapmyindia.com/api/advanced-maps/doc/sample/images/location.png",
+                        iconSize: [21, 32]
+                    }));
+                    marker.bindTooltip("River Pollution Index: " + data.intensity.toFixed(3));
+                };
+                clusterMarkers.push(marker)
+            });
+
+            let pollutionPromise = addPollutionIntensity(clusterMarkers);
+            pollutionPromise.done(function () {
+                markerCluster.RegisterMarkers(clusterMarkers);
+                map.addLayer(markerCluster);
+                markerCluster.FitBounds();
+                markerCluster.ProcessView();
+            });
+        }
+        function createMarker(point) {
+            let longitude = point[0];
+            let latitude = point[1];
+            return new L.LatLng(latitude, longitude);
+        }
+
+        function showHeatMap(markers) {
+            let intensity_markers = [];
+            markers.forEach(function (marker) {
+                intensity_markers.push([marker.lat, marker.lng, Math.random(1)])
+            });
+            let heatMap = L.heatLayer(intensity_markers);
+            console.log(heatMap);
+            map.addLayer(heatMap);
+            console.log(map);
+            // heatMap.addTo(map);
+        }
+
+        function getPollutionIntensity(markers) {
+            let post_markers = [];
+            markers.forEach(function(marker) {
+                post_markers.push({lat: marker.position.lat, lng: marker.position.lng});
+            });
+            return $.ajax({
+                type: "POST",
+                url: 'https://lvfzsg9nc7.execute-api.us-east-1.amazonaws.com/mapmyindia2',
+                headers: {
+                    "Content-Type": 'application/json'
+                    // "Access-Control-Allow-Origin": "*",
+                    // "Access-Control-Allow-Headers": "Content-Type",
+                    //     "Access-Control-Allow-Methods": "POST, GET, OPTIONS"
+                },
+                crossDomain: true,
+                contentType: 'application/json; charset=utf-8',
+                data: JSON.stringify({
+                    latlongArray: post_markers
+                })
+            });
+        }
+        function addPollutionIntensity(markers) {
+
+            var intensityPromise = getPollutionIntensity(markers);
+            intensityPromise
+                .done(function (intensities) {
+                    let maxIntensity = 0;
+                    markers.forEach(function(marker, index) {
+                        marker.data.intensity = intensities[index].intensity;
+                        if (maxIntensity < marker.data.intensity) {
+                            maxIntensity = marker.data.intensity;
+                        }
+                    });
+                });
+            return intensityPromise;
+        }
+    </script>
+</body>
+</html>
+
